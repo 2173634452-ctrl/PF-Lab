@@ -1,0 +1,49 @@
+# Build files
+build/
+*.o
+*.obj
+*.exe
+*.out
+*.log
+*.ilk
+*.pdb
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Visual Studio / VS Code
+.vscode/
+*.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Data files
+data/raw/*
+data/processed/*
+backup/*
+reports/*
+
+# Keep directory placeholders if needed
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!backup/.gitkeep
+!reports/.gitkeep
+
+# Task/temporary files
+*.tmp
+*.bak
+*~
+
+# Document files
+*.docx
+*.pdf
