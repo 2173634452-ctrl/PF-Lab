@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "data_io.h"
 #include "backup.h"
+#include "preprocess.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,9 +48,22 @@ void handle_menu_choice(int choice, WaterDataset **dataset) {
             }
             break;
         }
-        case 2:
-            printf("进入数据预处理模块...\n");
+        case 2: {
+            /* 模块二子菜单循环 */
+            int sub_choice = -1;
+            while (sub_choice != 0) {
+                show_preprocess_submenu(*dataset);
+                if (scanf("%d", &sub_choice) != 1) {
+                    printf("输入错误，请重新输入。\n");
+                    while (getchar() != '\n');
+                    sub_choice = -1;
+                    continue;
+                }
+                while (getchar() != '\n');
+                handle_preprocess_submenu(sub_choice, dataset);
+            }
             break;
+        }
         case 3:
             printf("进入统计分析模块...\n");
             break;
@@ -321,6 +335,133 @@ void handle_data_submenu(int choice, WaterDataset **dataset) {
 
 
 /* ═════════════════════════════════════════════════════════════════════
+ *  模块二 子菜单
+ * ═════════════════════════════════════════════════════════════════════ */
+
+void show_preprocess_submenu(const WaterDataset *dataset) {
+    printf("\n");
+    printf("  ╔════════════════════════════════════╗\n");
+    printf("  ║      模块二：数据预处理            ║\n");
+    printf("  ╠════════════════════════════════════╣\n");
+    printf("  ║  [1] 检测与处理异常值 (2.1)       ║\n");
+    printf("  ║  [2] 缺失值处理 (2.2)             ║\n");
+    printf("  ║  [3] 移动平均滤波 (2.3)           ║\n");
+    printf("  ║  [4] 保存处理后数据(CSV)          ║\n");
+    printf("  ║  [5] 保存处理后数据(二进制)       ║\n");
+    printf("  ║  [6] 查看预处理统计               ║\n");
+    printf("  ║  [0] 返回主菜单                   ║\n");
+    printf("  ╚════════════════════════════════════╝\n");
+    printf("  当前数据: %s\n",
+           (dataset && dataset->total_count > 0) ? "已加载" : "未加载");
+    printf("  请选择操作 (0-6): ");
+}
+
+void handle_preprocess_submenu(int choice, WaterDataset **dataset) {
+    switch (choice) {
+        case 1:
+            /* 2.1 异常值检测与处理 */
+            if (!ensure_data_loaded(*dataset)) break;
+            detect_and_handle_outliers(*dataset);
+            /* 处理后将统计信息写入概览文件 */
+            append_preprocess_overview(*dataset);
+            break;
+
+        case 2:
+            /* 2.2 缺失值处理——均值逼近法 */
+            if (!ensure_data_loaded(*dataset)) break;
+            fill_missing_values(*dataset);
+            /* 处理后将统计信息写入概览文件 */
+            append_preprocess_overview(*dataset);
+            break;
+
+        case 3:
+            /* 2.3 移动平均滤波 */
+            if (!ensure_data_loaded(*dataset)) break;
+            interactive_moving_average(*dataset);
+            break;
+
+        case 4: {
+            /* 保存处理后数据为CSV */
+            if (!ensure_data_loaded(*dataset)) break;
+            char outfile[256];
+            printf("请输入保存路径 (默认: data/processed/preprocessed_data.csv): ");
+            if (scanf("%255s", outfile) != 1) {
+                while (getchar() != '\n');
+                printf("输入无效。\n");
+                break;
+            }
+            while (getchar() != '\n');
+            if (strlen(outfile) == 0) {
+                strcpy(outfile, "data/processed/preprocessed_data.csv");
+            }
+            if (save_csv_data(outfile, *dataset)) {
+                printf("预处理数据已保存至 %s\n", outfile);
+            }
+            break;
+        }
+
+        case 5: {
+            /* 保存处理后数据为二进制 */
+            if (!ensure_data_loaded(*dataset)) break;
+            char outfile[256];
+            printf("请输入保存路径 (默认: data/processed/preprocessed_data.bin): ");
+            if (scanf("%255s", outfile) != 1) {
+                while (getchar() != '\n');
+                printf("输入无效。\n");
+                break;
+            }
+            while (getchar() != '\n');
+            if (strlen(outfile) == 0) {
+                strcpy(outfile, "data/processed/preprocessed_data.bin");
+            }
+            if (save_binary_data(outfile, *dataset)) {
+                printf("预处理数据已保存至 %s\n", outfile);
+            }
+            break;
+        }
+
+        case 6: {
+            /* 查看预处理统计信息 */
+            const PreprocessStats *stats = get_preprocess_stats();
+            if (!stats) {
+                printf("暂无预处理统计信息。\n");
+                break;
+            }
+            printf("\n┌──────────────────────────────────────────────────────────┐\n");
+            printf("│              预处理统计信息                               │\n");
+            printf("├──────────────────────────────────────────────────────────┤\n");
+            printf("│  [异常值检测]                                            │\n");
+            printf("│    异常数据记录数:     %8zu                          │\n",
+                   stats->outlier_record_count);
+            printf("│    异常参数总个数:     %8zu                          │\n",
+                   stats->outlier_param_count);
+            if (stats->outlier_time_start[0] != '\0') {
+                printf("│    异常时间跨度:       %s ~ %s  │\n",
+                       stats->outlier_time_start, stats->outlier_time_end);
+            }
+            printf("│    修复异常值记录数:   %8zu                          │\n",
+                   stats->fixed_record_count);
+            printf("│    删除异常值记录数:   %8zu                          │\n",
+                   stats->deleted_record_count);
+            printf("│  [缺失值处理]                                            │\n");
+            printf("│    处理的缺失值个数:   %8zu                          │\n",
+                   stats->missing_value_count);
+            printf("└──────────────────────────────────────────────────────────┘\n");
+            break;
+        }
+
+        case 0:
+            /* 返回主菜单 */
+            break;
+
+        default:
+            printf("无效选择，请重新输入。\n");
+            break;
+    }
+}
+
+
+/* ═════════════════════════════════════════════════════════════════════
  *  报告显示
  * ═════════════════════════════════════════════════════════════════════ */
 
@@ -340,6 +481,21 @@ void display_overview(const WaterDataset *dataset) {
                : 0.0);
     printf("║  当前容量:    %8zu             ║\n", dataset->capacity);
     printf("╚══════════════════════════════════════╝\n");
+
+    /* 如果有预处理统计信息，一并显示 */
+    const PreprocessStats *stats = get_preprocess_stats();
+    if (stats && (stats->outlier_record_count > 0 || stats->missing_value_count > 0)) {
+        printf("\n┌────────── 预处理统计 ─────────────────┐\n");
+        if (stats->outlier_record_count > 0) {
+            printf("│ 异常数据记录数:     %8zu          │\n", stats->outlier_record_count);
+            printf("│ 修复异常值记录数:   %8zu          │\n", stats->fixed_record_count);
+            printf("│ 删除异常值记录数:   %8zu          │\n", stats->deleted_record_count);
+        }
+        if (stats->missing_value_count > 0) {
+            printf("│ 处理的缺失值个数:   %8zu          │\n", stats->missing_value_count);
+        }
+        printf("└──────────────────────────────────────┘\n");
+    }
 }
 
 void display_report_menu(void) {
