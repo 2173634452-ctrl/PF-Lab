@@ -8,7 +8,16 @@
 #include "backup.h"
 #include "utils.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 int main(void) {
+#ifdef _WIN32
+    /* 将 Windows 控制台编码切换为 UTF-8，解决中文乱码 */
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+#endif
     WaterDataset *dataset = NULL;
     UserRole role = ROLE_UNKNOWN;
 
