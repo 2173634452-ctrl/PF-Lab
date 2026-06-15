@@ -3,6 +3,7 @@
 #include "data_io.h"
 #include "backup.h"
 #include "preprocess.h"
+#include "analysis.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,9 +65,22 @@ void handle_menu_choice(int choice, WaterDataset **dataset) {
             }
             break;
         }
-        case 3:
-            printf("进入统计分析模块...\n");
+        case 3: {
+            /* 模块三子菜单循环 */
+            int sub_choice = -1;
+            while (sub_choice != 0) {
+                show_analysis_submenu(*dataset);
+                if (scanf("%d", &sub_choice) != 1) {
+                    printf("输入错误，请重新输入。\n");
+                    while (getchar() != '\n');
+                    sub_choice = -1;
+                    continue;
+                }
+                while (getchar() != '\n');
+                handle_analysis_submenu(sub_choice, dataset);
+            }
             break;
+        }
         case 4:
             printf("进入预测分析模块...\n");
             break;
@@ -452,6 +466,84 @@ void handle_preprocess_submenu(int choice, WaterDataset **dataset) {
 
         case 0:
             /* 返回主菜单 */
+            break;
+
+        default:
+            printf("无效选择，请重新输入。\n");
+            break;
+    }
+}
+
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  模块三 子菜单
+ * ═════════════════════════════════════════════════════════════════════ */
+
+void show_analysis_submenu(const WaterDataset *dataset) {
+    printf("\n");
+    printf("  ╔════════════════════════════════════╗\n");
+    printf("  ║      模块三：统计分析              ║\n");
+    printf("  ╠════════════════════════════════════╣\n");
+    printf("  ║  [1] 基本统计量 (3.1)             ║\n");
+    printf("  ║  [2] 凌晨缺氧预警 (3.2)           ║\n");
+    printf("  ║  [3] 盐度突变预警 (3.2)           ║\n");
+    printf("  ║  [4] 相关性分析 (3.3)             ║\n");
+    printf("  ║  [5] 完整分析流程                 ║\n");
+    printf("  ║  [0] 返回主菜单                   ║\n");
+    printf("  ╚════════════════════════════════════╝\n");
+    printf("  当前数据: %s\n",
+           (dataset && dataset->total_count > 0) ? "已加载" : "未加载");
+    printf("  请选择操作 (0-5): ");
+}
+
+void handle_analysis_submenu(int choice, WaterDataset **dataset) {
+    switch (choice) {
+        case 1:
+            /* 3.1 基本统计量 */
+            if (!ensure_data_loaded(*dataset)) break;
+            compute_statistics(*dataset);
+            break;
+
+        case 2:
+            /* 3.2 凌晨缺氧预警 */
+            if (!ensure_data_loaded(*dataset)) break;
+            hypoxia_warning(*dataset);
+            break;
+
+        case 3:
+            /* 3.2 盐度突变预警 */
+            if (!ensure_data_loaded(*dataset)) break;
+            salinity_warning(*dataset);
+            break;
+
+        case 4: {
+            /* 3.3 皮尔逊相关系数矩阵 */
+            if (!ensure_data_loaded(*dataset)) break;
+            double matrix[6][6];
+            generate_correlation_matrix(*dataset, matrix);
+            break;
+        }
+
+        case 5:
+            /* 完整分析流程 */
+            if (!ensure_data_loaded(*dataset)) break;
+            printf("\n╔══════════════════════════════════════════════════════╗\n");
+            printf("║       执行完整分析流程 (3.1 → 3.2 → 3.3)             ║\n");
+            printf("╚══════════════════════════════════════════════════════╝\n");
+            compute_statistics(*dataset);
+            hypoxia_warning(*dataset);
+            salinity_warning(*dataset);
+            {
+                double matrix[6][6];
+                generate_correlation_matrix(*dataset, matrix);
+            }
+            printf("\n完整分析流程已执行完毕。\n");
+            printf("报告文件：\n");
+            printf("  - reports/statistics_report.csv (统计量 + 相关系数矩阵)\n");
+            printf("  - reports/warning_report.csv     (预警报告)\n");
+            break;
+
+        case 0:
             break;
 
         default:

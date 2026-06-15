@@ -15,6 +15,10 @@ void handle_data_submenu(int choice, WaterDataset **dataset);
 void show_preprocess_submenu(const WaterDataset *dataset);
 void handle_preprocess_submenu(int choice, WaterDataset **dataset);
 
+/* ── 模块三子菜单 ── */
+void show_analysis_submenu(const WaterDataset *dataset);
+void handle_analysis_submenu(int choice, WaterDataset **dataset);
+
 /* ── 报告 ── */
 void display_overview(const WaterDataset *dataset);
 void display_report_menu(void);
