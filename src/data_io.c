@@ -144,6 +144,7 @@ WaterDataset *load_csv_data(const char *filename) {
 
     dataset->total_count = 0;
     dataset->valid_count = 0;
+    dataset->preprocessed = false;  /* 新加载的数据尚未预处理 */
 
     char line[2048];
     int line_num = 0;
@@ -187,7 +188,7 @@ WaterDataset *load_csv_data(const char *filename) {
         char *fields[7] = {NULL};
         int field_count = split_csv_line(line, fields, 7);
 
-        if (field_count < 7) {
+        if (field_count < 6) {
             /* 字段数不足 → 标记无效 */
             rec->valid = false;
             dataset->total_count++;
@@ -195,16 +196,34 @@ WaterDataset *load_csv_data(const char *filename) {
         }
 
         /* 时间戳 */
-        strncpy(rec->timestamp, fields[0], sizeof(rec->timestamp) - 1);
-        rec->timestamp[sizeof(rec->timestamp) - 1] = '\0';
+        if (field_count >= 7) {
+            /* 7列：第0列是时间戳，其余为数据 */
+            strncpy(rec->timestamp, fields[0], sizeof(rec->timestamp) - 1);
+            rec->timestamp[sizeof(rec->timestamp) - 1] = '\0';
+        } else {
+            /* 6列：无时间戳列，按5分钟间隔自动生成（从2025-01-01 12:00:00开始，符合任务书要求） */
+            int total_minutes = (int)dataset->total_count * 5;
+            struct tm base = {0};
+            base.tm_year = 2025 - 1900;  /* 2025年 */
+            base.tm_mon  = 0;            /* January (0-based) */
+            base.tm_mday = 1;
+            base.tm_hour = 12;           /* 12:00 起始 */
+            base.tm_min  = 0;
+            base.tm_sec  = 0;
+            time_t t = mktime(&base) + total_minutes * 60;
+            struct tm *local = localtime(&t);
+            strftime(rec->timestamp, sizeof(rec->timestamp),
+                     "%Y-%m-%d %H:%M:%S", local);
+        }
 
-        /* 解析各数值字段 */
-        if (!parse_double_field(fields[1], &rec->temp))         rec->valid = false;
-        if (!parse_double_field(fields[2], &rec->salinity))     rec->valid = false;
-        if (!parse_double_field(fields[3], &rec->pH))           rec->valid = false;
-        if (!parse_double_field(fields[4], &rec->DO))           rec->valid = false;
-        if (!parse_double_field(fields[5], &rec->precipitation)) rec->valid = false;
-        if (!parse_double_field(fields[6], &rec->air_temp))     rec->valid = false;
+        /* 解析各数值字段：无时间戳时字段偏移量为0，有时间戳时偏移量为1 */
+        int offset = (field_count >= 7) ? 1 : 0;
+        if (!parse_double_field(fields[offset + 0], &rec->temp))         rec->valid = false;
+        if (!parse_double_field(fields[offset + 1], &rec->salinity))     rec->valid = false;
+        if (!parse_double_field(fields[offset + 2], &rec->pH))           rec->valid = false;
+        if (!parse_double_field(fields[offset + 3], &rec->DO))           rec->valid = false;
+        if (!parse_double_field(fields[offset + 4], &rec->precipitation)) rec->valid = false;
+        if (!parse_double_field(fields[offset + 5], &rec->air_temp))     rec->valid = false;
 
         if (rec->valid) dataset->valid_count++;
         dataset->total_count++;
@@ -734,6 +753,7 @@ void modify_single_record(WaterDataset *dataset) {
     rec->valid = true;  /* 修改后标记为有效 */
 
     printf("修改成功！\n");
+    dataset->preprocessed = false;  /* 数据被修改，预处理标记失效 */
 
     /* 询问是否保存 */
     if (confirm_action("是否将修改后的数据保存到文件？")) {
@@ -794,6 +814,7 @@ void delete_single_record(WaterDataset *dataset) {
     }
 
     printf("删除成功！当前总记录数: %zu\n", dataset->total_count);
+    dataset->preprocessed = false;  /* 数据被删除，预处理标记失效 */
     write_data_overview(dataset);
 }
 
@@ -877,6 +898,7 @@ void batch_delete_records(WaterDataset *dataset) {
 
     printf("批量删除成功！删除了 %zu 条记录，当前总记录数: %zu\n",
            match_count, dataset->total_count);
+    dataset->preprocessed = false;  /* 数据被删除，预处理标记失效 */
     write_data_overview(dataset);
 }
 

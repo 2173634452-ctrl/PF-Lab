@@ -78,6 +78,25 @@ static void extract_date(const char *timestamp, char date[11]) {
     date[10] = '\0';
 }
 
+/* 将时间戳 "YYYY-MM-DD HH:MM:SS" 解析为从当天00:00起的分钟数
+ * 用于计算两条记录之间的真实时间间隔，避免依赖固定索引偏移 */
+static long timestamp_to_minutes(const char *ts) {
+    int year, month, day, hour, minute, second;
+    if (sscanf(ts, "%d-%d-%d %d:%d:%d",
+               &year, &month, &day, &hour, &minute, &second) < 5) {
+        return -1;  /* 解析失败 */
+    }
+    struct tm tm_info = {0};
+    tm_info.tm_year = year - 1900;
+    tm_info.tm_mon  = month - 1;
+    tm_info.tm_mday = day;
+    tm_info.tm_hour = hour;
+    tm_info.tm_min  = minute;
+    tm_info.tm_sec  = second;
+    time_t epoch = mktime(&tm_info);
+    return (long)(epoch / 60);  /* 转换为分钟 */
+}
+
 /* ═════════════════════════════════════════════════════════════════════
  *  内部辅助：写入警告到 CSV 文件
  * ═════════════════════════════════════════════════════════════════════ */
@@ -290,11 +309,11 @@ void hypoxia_warning(const WaterDataset *dataset) {
 /* ═════════════════════════════════════════════════════════════════════
  *  3.2 盐度突变预警
  *
- *  1小时变化率：|盐度(t) - 盐度(t-12)| > 2 PSU → 预警
- *    其中 t-12 为 1 小时前（12 条记录前，每5分钟一条）
+ *  1小时变化率：|盐度(t) - 盐度(t-60min)| > 2 PSU → 预警
+ *    基于真实时间戳计算1小时间隔，适应记录删除后的时间缺口
  *
- *  24小时累计降幅：24小时窗口内 max - min > 5 PSU → 预警
- *    24小时 = 288 条记录
+ *  24小时累计降幅：按日历日期分组，日内 max - min > 5 PSU → 预警
+ *    基于真实时间戳按天分组，不依赖固定记录数
  * ═════════════════════════════════════════════════════════════════════ */
 void salinity_warning(const WaterDataset *dataset) {
     if (!dataset || dataset->total_count == 0) {
@@ -317,65 +336,95 @@ void salinity_warning(const WaterDataset *dataset) {
     int warning_1h = 0;    /* 1小时突变预警计数 */
     int warning_24h = 0;   /* 24小时累计预警计数 */
 
-    /* ── 1小时变化率检测 ── */
-    printf("  [1] 检测1小时盐度突变 (阈值: > 2 PSU)...\n");
+    /* ── 1小时变化率检测（基于真实时间戳） ── */
+    printf("  [1] 检测1小时盐度突变 (阈值: > 2 PSU，基于真实时间戳)...\n");
 
-    for (size_t i = 12; i < dataset->total_count; i++) {
-        const WaterRecord *rec_cur  = &dataset->records[i];
-        const WaterRecord *rec_prev = &dataset->records[i - 12];
+    /* 双指针法：prev 始终指向约1小时前的记录 */
+    size_t prev = 0;
+    for (size_t i = 0; i < dataset->total_count; i++) {
+        const WaterRecord *rec_cur = &dataset->records[i];
+        if (!rec_cur->valid) continue;
 
-        if (!rec_cur->valid || !rec_prev->valid) continue;
+        long t_cur = timestamp_to_minutes(rec_cur->timestamp);
+        if (t_cur < 0) continue;
 
-        double diff = fabs(rec_cur->salinity - rec_prev->salinity);
-        if (diff > 2.0) {
-            warning_1h++;
-            printf("  ⚠ 1小时盐度突变 | %s | 变化 %.2f PSU | 建议关闭进水口，泼洒高稳VC\n",
-                   rec_cur->timestamp, diff);
-            if (fp) {
-                char label[64];
-                snprintf(label, sizeof(label), "盐度突变(1h)");
-                write_warning(fp, label, rec_cur->timestamp,
-                              "盐度突变预警",
-                              "建议关闭进水口，泼洒高稳VC或葡萄糖");
+        /* 推进 prev 指针，直到找到 timestamp ≈ t_cur - 60 的记录 */
+        while (prev < i) {
+            const WaterRecord *rec_p = &dataset->records[prev];
+            if (!rec_p->valid) { prev++; continue; }
+            long t_prev = timestamp_to_minutes(rec_p->timestamp);
+            if (t_prev < 0) { prev++; continue; }
+
+            long gap = t_cur - t_prev;
+            if (gap > 65) {
+                /* prev 太早，追赶 */
+                prev++;
+                continue;
             }
+            if (gap < 55) {
+                /* prev 太近，停止搜索（再往后会更近） */
+                break;
+            }
+            /* gap 在 [55, 65] 分钟内 → 约1小时，进行比较 */
+            double diff = fabs(rec_cur->salinity - rec_p->salinity);
+            if (diff > 2.0) {
+                warning_1h++;
+                printf("  ⚠ 1小时盐度突变 | %s | 变化 %.2f PSU | 建议关闭进水口，泼洒高稳VC\n",
+                       rec_cur->timestamp, diff);
+                if (fp) {
+                    char label[64];
+                    snprintf(label, sizeof(label), "盐度突变(1h)");
+                    write_warning(fp, label, rec_cur->timestamp,
+                                  "盐度突变预警",
+                                  "建议关闭进水口，泼洒高稳VC或葡萄糖");
+                }
+            }
+            /* 比较完成后，prev 前进一位继续为下一轮准备 */
+            prev++;
+            break;
         }
     }
     if (warning_1h == 0) {
         printf("     未检测到1小时盐度突变。\n");
     }
 
-    /* ── 24小时累计降幅检测 ── */
-    printf("\n  [2] 检测24小时累计盐度降幅 (阈值: > 5 PSU)...\n");
+    /* ── 24小时累计降幅检测（按日历日期分组） ── */
+    printf("\n  [2] 检测24小时累计盐度降幅 (阈值: > 5 PSU，按日历日期分组)...\n");
 
-    /* 24小时 = 288条记录。滑动窗口：对每个起始点i，
-     * 检查从 i 到 i+287 的盐度最大最小值差异。
-     * 为效率考虑，按天（288条为单位）进行批处理。 */
-    size_t day_size = 288;
-    for (size_t start = 0; start < dataset->total_count; start += day_size) {
-        size_t end = start + day_size;
-        if (end > dataset->total_count) end = dataset->total_count;
+    size_t i = 0;
+    int day_count = 0;
+    while (i < dataset->total_count) {
+        char current_date[11];
+        extract_date(dataset->records[i].timestamp, current_date);
 
         double sal_min = 1e9, sal_max = -1e9;
         bool has_valid = false;
 
-        for (size_t i = start; i < end; i++) {
+        /* 收集当天所有记录的盐度范围 */
+        while (i < dataset->total_count) {
+            char rec_date[11];
+            extract_date(dataset->records[i].timestamp, rec_date);
+            if (strcmp(rec_date, current_date) != 0) break;
+
             const WaterRecord *rec = &dataset->records[i];
-            if (!rec->valid) continue;
-            if (rec->salinity < sal_min) sal_min = rec->salinity;
-            if (rec->salinity > sal_max) sal_max = rec->salinity;
-            has_valid = true;
+            if (rec->valid) {
+                if (rec->salinity < sal_min) sal_min = rec->salinity;
+                if (rec->salinity > sal_max) sal_max = rec->salinity;
+                has_valid = true;
+            }
+            i++;
         }
+
+        day_count++;
 
         if (has_valid && (sal_max - sal_min > 5.0)) {
             warning_24h++;
-            printf("  ⚠ 24h盐度累计降幅 | %s ~ %s | 降幅 %.2f PSU | 建议关闭进水口，泼洒高稳VC\n",
-                   dataset->records[start].timestamp,
-                   dataset->records[end - 1].timestamp,
-                   sal_max - sal_min);
+            printf("  ⚠ 24h盐度累计降幅 | %s | 降幅 %.2f PSU | 建议关闭进水口，泼洒高稳VC\n",
+                   current_date, sal_max - sal_min);
             if (fp) {
                 char label[64];
                 snprintf(label, sizeof(label), "盐度突变(24h累计)");
-                write_warning(fp, label, dataset->records[start].timestamp,
+                write_warning(fp, label, current_date,
                               "盐度突变预警",
                               "建议关闭进水口，泼洒高稳VC或葡萄糖");
             }
@@ -385,8 +434,8 @@ void salinity_warning(const WaterDataset *dataset) {
         printf("     未检测到24小时盐度累计突变。\n");
     }
 
-    printf("\n  盐度突变预警完成：1小时突变 %d 次，24小时累计突变 %d 次。\n",
-           warning_1h, warning_24h);
+    printf("\n  盐度突变预警完成：1小时突变 %d 次，24小时累计突变 %d 次（共 %d 天）。\n",
+           warning_1h, warning_24h, day_count);
 
     if (fp) {
         fclose(fp);

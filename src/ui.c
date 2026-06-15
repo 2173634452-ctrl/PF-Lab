@@ -160,19 +160,19 @@ void show_data_submenu(const WaterDataset *dataset) {
     printf("  ╔════════════════════════════════════╗\n");
     printf("  ║      模块一：数据基础操作          ║\n");
     printf("  ╠════════════════════════════════════╣\n");
-    printf("  ║  [1] 加载CSV数据                  ║\n");
-    printf("  ║  [2] 分页浏览数据                 ║\n");
-    printf("  ║  [3] 按条件筛选                   ║\n");
-    printf("  ║  [4] 按参数排序                   ║\n");
-    printf("  ║  [5] 修改单条记录                 ║\n");
-    printf("  ║  [6] 删除单条记录                 ║\n");
-    printf("  ║  [7] 批量删除记录                 ║\n");
-    printf("  ║  [8] 保存数据(CSV)                ║\n");
-    printf("  ║  [9] 保存数据(二进制)             ║\n");
-    printf("  ║ [10] 存储性能对比                 ║\n");
-    printf("  ║ [11] 手动备份数据                 ║\n");
-    printf("  ║ [12] 从备份恢复数据               ║\n");
-    printf("  ║  [0] 返回主菜单                   ║\n");
+    printf("  ║  [1] 加载CSV数据                   ║\n");
+    printf("  ║  [2] 分页浏览数据                  ║\n");
+    printf("  ║  [3] 按条件筛选                    ║\n");
+    printf("  ║  [4] 按参数排序                    ║\n");
+    printf("  ║  [5] 修改单条记录                  ║\n");
+    printf("  ║  [6] 删除单条记录                  ║\n");
+    printf("  ║  [7] 批量删除记录                  ║\n");
+    printf("  ║  [8] 保存数据(CSV)                 ║\n");
+    printf("  ║  [9] 保存数据(二进制)              ║\n");
+    printf("  ║ [10] 存储性能对比                  ║\n");
+    printf("  ║ [11] 手动备份数据                  ║\n");
+    printf("  ║ [12] 从备份恢复数据                ║\n");
+    printf("  ║  [0] 返回主菜单                    ║\n");
     printf("  ╚════════════════════════════════════╝\n");
     printf("  当前数据: %s\n",
            (dataset && dataset->total_count > 0) ? "已加载" : "未加载");
@@ -376,6 +376,7 @@ void handle_preprocess_submenu(int choice, WaterDataset **dataset) {
             /* 2.1 异常值检测与处理 */
             if (!ensure_data_loaded(*dataset)) break;
             detect_and_handle_outliers(*dataset);
+            (*dataset)->preprocessed = true;
             /* 处理后将统计信息写入概览文件 */
             append_preprocess_overview(*dataset);
             break;
@@ -384,6 +385,7 @@ void handle_preprocess_submenu(int choice, WaterDataset **dataset) {
             /* 2.2 缺失值处理——均值逼近法 */
             if (!ensure_data_loaded(*dataset)) break;
             fill_missing_values(*dataset);
+            (*dataset)->preprocessed = true;
             /* 处理后将统计信息写入概览文件 */
             append_preprocess_overview(*dataset);
             break;
@@ -392,6 +394,7 @@ void handle_preprocess_submenu(int choice, WaterDataset **dataset) {
             /* 2.3 移动平均滤波 */
             if (!ensure_data_loaded(*dataset)) break;
             interactive_moving_average(*dataset);
+            (*dataset)->preprocessed = true;
             break;
 
         case 4: {
@@ -491,12 +494,37 @@ void show_analysis_submenu(const WaterDataset *dataset) {
     printf("  ║  [5] 完整分析流程                 ║\n");
     printf("  ║  [0] 返回主菜单                   ║\n");
     printf("  ╚════════════════════════════════════╝\n");
-    printf("  当前数据: %s\n",
+    printf("  当前数据: %s",
            (dataset && dataset->total_count > 0) ? "已加载" : "未加载");
+    if (dataset && dataset->total_count > 0) {
+        printf(" | 预处理: %s", dataset->preprocessed ? "✓已完成" : "✗未完成");
+    }
+    printf("\n");
     printf("  请选择操作 (0-5): ");
 }
 
 void handle_analysis_submenu(int choice, WaterDataset **dataset) {
+    /* 分析前检查：数据是否已完成预处理 */
+    if (choice >= 1 && choice <= 5 && *dataset && (*dataset)->total_count > 0
+        && !(*dataset)->preprocessed) {
+        printf("\n  ╔══════════════════════════════════════════════╗\n");
+        printf("  ║  ⚠ 提醒：当前数据尚未进行预处理！           ║\n");
+        printf("  ║  建议先执行 [模块二→数据预处理] 清洗数据，  ║\n");
+        printf("  ║  否则分析结果可能包含异常值、缺失值干扰。   ║\n");
+        printf("  ╠══════════════════════════════════════════════╣\n");
+        printf("  ║  [Y] 继续分析（跳过预处理）                 ║\n");
+        printf("  ║  [N] 返回菜单                               ║\n");
+        printf("  ╚══════════════════════════════════════════════╝\n");
+        printf("  请选择 (Y/N): ");
+        char ans;
+        scanf(" %c", &ans);
+        while (getchar() != '\n');
+        if (ans != 'Y' && ans != 'y') {
+            printf("  已取消，请先执行数据预处理。\n");
+            return;
+        }
+    }
+
     switch (choice) {
         case 1:
             /* 3.1 基本统计量 */

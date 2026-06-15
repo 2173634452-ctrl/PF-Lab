@@ -19,11 +19,11 @@
 
 | 文件 | 修改内容 |
 |------|---------|
-| `include/common.h` | 新增 `#include <time.h>`；新增6组参数合理范围常量（`VALID_TEMP_MIN/MAX` 等） |
+| `include/common.h` | 新增 `#include <time.h>`、`#include <stdbool.h>`；新增6组参数合理范围常量（`VALID_TEMP_MIN/MAX` 等）；`WaterDataset` 新增 `bool preprocessed` 字段 |
 | `include/data_io.h` | 新增10个函数声明：数据概览、存储性能对比、分页浏览、筛选、排序、修改、单条删除、批量删除 |
 | `include/backup.h` | 新增 `list_backup_files`、`validate_backup_file` 函数声明；调整 `list_backup_files` 缓冲区大小 |
 | `include/ui.h` | 新增 `show_data_submenu`、`handle_data_submenu` 函数声明；`show_data_submenu` 增加参数 |
-| `src/data_io.c` | **重写全部内容**（原为5个空壳函数）。实现：CSV读取（动态扩容+缺失值处理+错误处理）、CSV/二进制读写、性能对比、分页浏览、条件筛选、参数排序、单条修改（含范围验证+自动备份）、单条删除+批量删除（含确认+自动备份） |
+| `src/data_io.c` | **重写全部内容**（原为5个空壳函数）。实现：CSV读取（动态扩容+缺失值处理+错误处理+**6/7列兼容解析+时间戳自动生成**）、CSV/二进制读写、性能对比、分页浏览、条件筛选、参数排序、单条修改（含范围验证+自动备份+预处理标记重置）、单条删除+批量删除（含确认+自动备份+预处理标记重置） |
 | `src/backup.c` | **重写全部内容**（原为2个空壳函数）。实现：带时间戳备份、备份文件列表、格式验证、数据恢复 |
 | `src/ui.c` | 模块一子菜单（12个选项）的实现与串联；主菜单中数据备份/恢复快捷入口；数据概览显示 |
 
@@ -90,7 +90,41 @@ gcc -Iinclude src/*.c -o seawater_analysis -Wall -Wextra
 
 ---
 
-## 五、待完成依赖
+## 五、BUG 修复记录（2026-06-15 追加）
+
+> 以下 BUG 在模块三集成测试时发现，根因均在模块一的 `src/data_io.c`。
+
+### BUG-1：CSV 列数不匹配导致数据显示全为零 🔴
+
+| 项目 | 说明 |
+|------|------|
+| **严重程度** | 🔴 严重 — 数据读取全部失效 |
+| **根因** | CSV 文件实际为 **6 列**（无时间戳列），但 `load_csv_data` 解析条件为 `field_count < 7`，导致全部 23,203 条记录被跳过 |
+| **修复** | `field_count < 7` → `< 6`；增加 `offset` 变量（6 列 =0，7 列 =1）统一数值字段索引；6 列时自动生成时间戳 |
+| **影响文件** | `src/data_io.c` 第 191-216 行 |
+
+### BUG-2：时间戳自动生成溢出（非法日期 `2024-01-81`） 🟡
+
+| 项目 | 说明 |
+|------|------|
+| **严重程度** | 🟡 中等 — 后期记录的日期显示异常，按天分组混乱 |
+| **根因** | 初版用 `sprintf(ts, "2024-01-%02d 12:%02d:%02d", day_index, ...)` 硬编码拼凑。当记录数 > 31×288 时，`day_index` 超过 31，`%02d` 不会自动进位，产生 `2024-01-81` 等非法日期 |
+| **修复** | 改用 `mktime()` + `localtime()` + `strftime()` 标准日历函数，`mktime` 自动处理月/年进位和闰年；时间基准从 2024-01-01 改为任务书要求的 **2025-01-01 12:00** |
+| **影响文件** | `src/data_io.c` 第 203-216 行 |
+
+### 关联影响
+
+BUG-1 和 BUG-2 的修复还涉及以下连锁改动：
+
+| 改动 | 说明 |
+|------|------|
+| `include/common.h` | `WaterDataset` 新增 `bool preprocessed` 字段 |
+| `src/data_io.c` | `modify_single_record`、`delete_single_record`、`batch_delete_records` 执行后将 `preprocessed` 重置为 `false` |
+| `src/ui.c` | 分析子菜单新增预处理状态显示 + Y/N 提醒确认 |
+
+---
+
+## 六、待完成依赖
 
 - 模块一正常运行需要 `data/raw/data.csv` 数据文件（用户需自行放入）
 - 模块二 ~ 模块五尚未实现（函数仍为空壳）

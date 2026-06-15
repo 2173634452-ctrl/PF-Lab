@@ -40,6 +40,7 @@ typedef struct {
     size_t total_count;
     size_t valid_count;
     size_t capacity;
+    bool preprocessed;   /* 是否已执行预处理（异常值+缺失值+滤波） */
 } WaterDataset;
 
 #endif // COMMON_H
