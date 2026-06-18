@@ -192,28 +192,29 @@ static double mean_approximation_fill(const WaterDataset *dataset,
 static int count_outliers(const WaterRecord *rec, bool out_params[6]) {
     int count = 0;
 
-    /* 依次检查6个参数是否在合理范围内 */
-    if (!is_param_in_range(PARAM_TEMP, rec->temp)) {
+    /* NaN 是缺失值（归2.2处理），不是异常值，跳过 NaN
+     * 只有非 NaN 且超出合理范围的值才算异常值 */
+    if (!isnan(rec->temp) && !is_param_in_range(PARAM_TEMP, rec->temp)) {
         out_params[PARAM_TEMP] = true;
         count++;
     }
-    if (!is_param_in_range(PARAM_SALINITY, rec->salinity)) {
+    if (!isnan(rec->salinity) && !is_param_in_range(PARAM_SALINITY, rec->salinity)) {
         out_params[PARAM_SALINITY] = true;
         count++;
     }
-    if (!is_param_in_range(PARAM_PH, rec->pH)) {
+    if (!isnan(rec->pH) && !is_param_in_range(PARAM_PH, rec->pH)) {
         out_params[PARAM_PH] = true;
         count++;
     }
-    if (!is_param_in_range(PARAM_DO, rec->DO)) {
+    if (!isnan(rec->DO) && !is_param_in_range(PARAM_DO, rec->DO)) {
         out_params[PARAM_DO] = true;
         count++;
     }
-    if (!is_param_in_range(PARAM_PRECIP, rec->precipitation)) {
+    if (!isnan(rec->precipitation) && !is_param_in_range(PARAM_PRECIP, rec->precipitation)) {
         out_params[PARAM_PRECIP] = true;
         count++;
     }
-    if (!is_param_in_range(PARAM_AIR_TEMP, rec->air_temp)) {
+    if (!isnan(rec->air_temp) && !is_param_in_range(PARAM_AIR_TEMP, rec->air_temp)) {
         out_params[PARAM_AIR_TEMP] = true;
         count++;
     }
@@ -226,7 +227,7 @@ static int count_outliers(const WaterRecord *rec, bool out_params[6]) {
  *  2.1 异常值检测与处理
  *
  *  执行流程：
- *    1. 扫描所有有效记录，检测超出合理范围的异常值
+ *    1. 扫描所有记录，检测超出合理范围的异常值（NaN视为缺失值，不计入异常）
  *    2. 统计异常信息（记录数、参数个数、时间跨度）
  *    3. 异常参数 ≥ 3 个 → 整条记录删除
  *    4. 异常参数 < 3 个 → 用均值逼近法填充异常值
@@ -248,8 +249,8 @@ void detect_and_handle_outliers(WaterDataset *dataset) {
     printf("╚══════════════════════════════════════════════════════════╝\n\n");
 
     /* ─────────────────────────────────────────────────────────────
-     *  第一遍扫描：统计每条有效记录的异常参数个数
-     *  使用动态数组记录每条记录的异常情况，避免重复扫描
+     *  第一遍扫描：统计每条记录的异常参数个数（含 valid=false 的记录）
+     *  NaN 会被 count_outliers 跳过，不计为异常
      * ───────────────────────────────────────────────────────────── */
     printf("正在扫描异常值...\n");
 
@@ -266,12 +267,10 @@ void detect_and_handle_outliers(WaterDataset *dataset) {
         return;
     }
 
-    /* 扫描所有有效记录 */
+    /* 扫描所有记录（含 valid=false 的缺失值记录，
+     * count_outliers 会将 NaN 与真正的异常值区分开） */
     for (size_t i = 0; i < dataset->total_count; i++) {
         WaterRecord *rec = &dataset->records[i];
-
-        /* 跳过已标记为无效的记录（含缺失值的记录） */
-        if (!rec->valid) continue;
 
         bool out_params[6] = {false};
         int n_outliers = count_outliers(rec, out_params);

@@ -44,8 +44,10 @@ static int split_csv_line(char *line, char *fields[], int max_fields) {
         }
         p++;
     }
-    /* 去除行尾换行符 */
-    if (p > line && (*(p - 1) == '\n' || *(p - 1) == '\r')) *(p - 1) = '\0';
+    /* 去除行尾换行符（兼容 \r\n、\n、\r 等各种组合） */
+    while (p > line && (*(p - 1) == '\n' || *(p - 1) == '\r')) {
+        *(--p) = '\0';
+    }
     return count;
 }
 
@@ -218,12 +220,18 @@ WaterDataset *load_csv_data(const char *filename) {
 
         /* 解析各数值字段：无时间戳时字段偏移量为0，有时间戳时偏移量为1 */
         int offset = (field_count >= 7) ? 1 : 0;
-        if (!parse_double_field(fields[offset + 0], &rec->temp))         rec->valid = false;
-        if (!parse_double_field(fields[offset + 1], &rec->salinity))     rec->valid = false;
-        if (!parse_double_field(fields[offset + 2], &rec->pH))           rec->valid = false;
-        if (!parse_double_field(fields[offset + 3], &rec->DO))           rec->valid = false;
-        if (!parse_double_field(fields[offset + 4], &rec->precipitation)) rec->valid = false;
-        if (!parse_double_field(fields[offset + 5], &rec->air_temp))     rec->valid = false;
+        if (!parse_double_field(fields[offset + 0], &rec->temp))
+            { rec->valid = false; rec->temp = NAN; }
+        if (!parse_double_field(fields[offset + 1], &rec->salinity))
+            { rec->valid = false; rec->salinity = NAN; }
+        if (!parse_double_field(fields[offset + 2], &rec->pH))
+            { rec->valid = false; rec->pH = NAN; }
+        if (!parse_double_field(fields[offset + 3], &rec->DO))
+            { rec->valid = false; rec->DO = NAN; }
+        if (!parse_double_field(fields[offset + 4], &rec->precipitation))
+            { rec->valid = false; rec->precipitation = NAN; }
+        if (!parse_double_field(fields[offset + 5], &rec->air_temp))
+            { rec->valid = false; rec->air_temp = NAN; }
 
         if (rec->valid) dataset->valid_count++;
         dataset->total_count++;
@@ -301,6 +309,9 @@ bool save_csv_data(const char *filename, const WaterDataset *dataset) {
                     rec->DO,
                     rec->precipitation,
                     rec->air_temp);
+        } else {
+            /* 无效记录以 NaN 占位，与备份保持一致 */
+            fprintf(fp, "%s,NaN,NaN,NaN,NaN,NaN,NaN\n", rec->timestamp);
         }
     }
 

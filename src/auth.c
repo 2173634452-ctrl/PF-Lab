@@ -33,6 +33,10 @@ bool has_permission(UserRole role, int feature) {
     if (role == ROLE_ADMIN) {
         return true;
     }
+    /* 系统级操作（清屏、退出）对所有角色开放 */
+    if (feature == 9 || feature == 0) {
+        return true;
+    }
     if (role == ROLE_GUEST) {
         return (feature == 5 || feature == 7);
     }

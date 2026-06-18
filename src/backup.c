@@ -8,6 +8,7 @@
 #include <sys/types.h>
 
 #ifdef _WIN32
+#include <direct.h>
 #include <windows.h>
 #else
 #include <dirent.h>
@@ -39,7 +40,7 @@ bool backup_dataset(const char *directory, const WaterDataset *dataset) {
 
     /* 确保备份目录存在（尝试创建） */
 #ifdef _WIN32
-    mkdir(directory);
+    _mkdir(directory);
 #else
     mkdir(directory, 0755);
 #endif

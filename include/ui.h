@@ -2,10 +2,11 @@
 #define UI_H
 
 #include "common.h"
+#include "auth.h"
 
 /* ── 主菜单 ── */
-void show_main_menu(void);
-void handle_menu_choice(int choice, WaterDataset **dataset);
+void show_main_menu(UserRole role);
+void handle_menu_choice(int choice, WaterDataset **dataset, UserRole role);
 
 /* ── 模块一子菜单 ── */
 void show_data_submenu(const WaterDataset *dataset);

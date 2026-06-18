@@ -27,22 +27,21 @@ int main(void) {
     }
 
     while (true) {
-        show_main_menu();
+        show_main_menu(role);
         int choice = 0;
         if (scanf("%d", &choice) != 1) {
-            clear_console();
             printf("输入错误，请重新输入。\n");
             while (getchar() != '\n');
+            clear_console();
             continue;
         }
         if (choice == 0) {
-            printf("确认退出系统？(y/n): ");
             if (confirm_action("退出系统")) {
                 break;
             }
             continue;
         }
-        handle_menu_choice(choice, &dataset);
+        handle_menu_choice(choice, &dataset, role);
     }
 
     if (dataset) {

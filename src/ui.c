@@ -8,30 +8,49 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 前向声明：内部辅助函数 */
+static void display_text_file(const char *filepath, const char *title);
+
 
 /* ═════════════════════════════════════════════════════════════════════
  *  主菜单
  * ═════════════════════════════════════════════════════════════════════ */
 
-void show_main_menu(void) {
+void show_main_menu(UserRole role) {
     printf("\n========================================\n");
     printf("  海水养殖水质分析系统 v1.0\n");
+    if (role == ROLE_ADMIN)
+        printf("  当前用户: 管理员 (admin)\n");
+    else
+        printf("  当前用户: 访客 (guest)\n");
     printf("========================================\n");
-    printf(" [1] 数据基础操作\n");
-    printf(" [2] 数据预处理\n");
-    printf(" [3] 统计分析\n");
-    printf(" [4] 预测分析\n");
+    if (role == ROLE_ADMIN) {
+        printf(" [1] 数据基础操作\n");
+        printf(" [2] 数据预处理\n");
+        printf(" [3] 统计分析\n");
+        printf(" [4] 预测分析\n");
+    }
     printf(" [5] 查看数据概览\n");
-    printf(" [6] 查看预警报告\n");
+    if (role == ROLE_ADMIN) {
+        printf(" [6] 查看预警报告\n");
+    }
     printf(" [7] 查看分析报告\n");
-    printf(" [8] 数据备份与恢复\n");
+    if (role == ROLE_ADMIN) {
+        printf(" [8] 数据备份与恢复\n");
+    }
     printf(" [9] 清屏\n");
     printf(" [0] 退出系统\n");
     printf("========================================\n");
     printf("  请选择操作 (0-9): ");
 }
 
-void handle_menu_choice(int choice, WaterDataset **dataset) {
+void handle_menu_choice(int choice, WaterDataset **dataset, UserRole role) {
+    /* 权限控制：检查当前用户是否有权限执行所选功能 */
+    if (!has_permission(role, choice)) {
+        printf("权限不足：当前用户角色无权访问此功能。\n");
+        return;
+    }
+
     switch (choice) {
         case 1: {
             /* 模块一子菜单循环 */
@@ -82,16 +101,26 @@ void handle_menu_choice(int choice, WaterDataset **dataset) {
             break;
         }
         case 4:
-            printf("进入预测分析模块...\n");
+            printf("\n╔══════════════════════════════════════════════════════════╗\n");
+            printf("║  预测分析模块 — 开发中                                   ║\n");
+            printf("╠══════════════════════════════════════════════════════════╣\n");
+            printf("║  本模块将实现：                                          ║\n");
+            printf("║  · 气温 → 溶解氧 线性回归预测模型                       ║\n");
+            printf("║  · 决定系数 R² 与留出法模型评估                         ║\n");
+            printf("║  · 多因子探索（水温/pH/盐度 ↔ DO）                      ║\n");
+            printf("║                                                          ║\n");
+            printf("║  敬请期待...                                             ║\n");
+            printf("╚══════════════════════════════════════════════════════════╝\n");
             break;
         case 5:
             display_overview(*dataset);
             break;
         case 6:
-            printf("查看预警报告...\n");
+            display_text_file("reports/warning_report.csv", "预警报告");
             break;
         case 7:
-            printf("查看分析报告...\n");
+            display_text_file("reports/statistics_report.csv", "统计分析报告");
+            display_text_file("reports/data_overview.txt", "数据概览报告");
             break;
         case 8: {
             /* 主菜单快捷备份/恢复 */
@@ -580,6 +609,35 @@ void handle_analysis_submenu(int choice, WaterDataset **dataset) {
     }
 }
 
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  内部辅助：显示文本文件内容
+ *  用于在主菜单中查看报告文件（预警报告、分析报告等）
+ * ═════════════════════════════════════════════════════════════════════ */
+static void display_text_file(const char *filepath, const char *title) {
+    FILE *fp = fopen(filepath, "r");
+    if (!fp) {
+        printf("\n  [提示] %s 文件不存在 (%s)。\n", title, filepath);
+        printf("  请先执行相应的分析功能生成报告。\n\n");
+        return;
+    }
+    printf("\n┌──────────────── %s ────────────────┐\n", title);
+    char line[1024];
+    int line_count = 0;
+    while (fgets(line, sizeof(line), fp) && line_count < 200) {
+        /* 去除行尾换行符以便格式化输出 */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+        printf("  %s\n", line);
+        line_count++;
+    }
+    if (line_count >= 200) {
+        printf("  ... (文件较长，仅显示前200行)\n");
+    }
+    printf("└──────────────────────────────────────────┘\n\n");
+    fclose(fp);
+}
 
 /* ═════════════════════════════════════════════════════════════════════
  *  报告显示
