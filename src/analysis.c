@@ -230,10 +230,10 @@ void hypoxia_warning(const WaterDataset *dataset) {
 
     printf("  正在分析每日凌晨 03:00-05:00 的溶解氧数据...\n\n");
 
-    /* 写入 CSV 预警报告 */
+    /* 写入 CSV 预警报告（覆盖模式：新报告替换旧报告） */
     FILE *fp = fopen("reports/warning_report.csv", "w");
     if (fp) {
-        fprintf(fp, "预警类型,日期,预警等级,处理建议\n");
+        fprintf(fp, "预警类型,时间,预警等级,处理建议\n");
     }
 
     /* ── 按天遍历 ── */
@@ -295,7 +295,6 @@ void hypoxia_warning(const WaterDataset *dataset) {
 
     if (warning_count == 0) {
         printf("  分析 %d 天数据，未触发凌晨缺氧预警。\n", day_count);
-        if (fp) fprintf(fp, "未触发凌晨缺氧预警\n");
     } else {
         printf("\n  分析 %d 天数据，共触发 %d 条预警。\n", day_count, warning_count);
     }
@@ -326,11 +325,13 @@ void salinity_warning(const WaterDataset *dataset) {
     printf("╚══════════════════════════════════════════════════════════╝\n\n");
 
     /* 追加模式打开预警报告（缺氧预警可能已创建） */
-    FILE *fp = fopen("reports/warning_report.csv", "a");
-    /* 如果文件不存在则创建并写表头 */
-    if (!fp) {
-        fp = fopen("reports/warning_report.csv", "w");
-        if (fp) fprintf(fp, "预警类型,日期时间,预警等级,处理建议\n");
+    FILE *fp = fopen("reports/warning_report.csv", "r");
+    int file_exists_sal = (fp != NULL);
+    if (fp) fclose(fp);
+
+    fp = fopen("reports/warning_report.csv", "a");
+    if (fp && !file_exists_sal) {
+        fprintf(fp, "预警类型,时间,预警等级,处理建议\n");
     }
 
     int warning_1h = 0;    /* 1小时突变预警计数 */
@@ -564,9 +565,9 @@ void generate_correlation_matrix(const WaterDataset *dataset, double matrix[6][6
     /* ── 步骤4：写入 CSV ── */
     FILE *fp = fopen("reports/statistics_report.csv", "a");
     if (fp) {
-        fprintf(fp, "\n6×6 皮尔逊相关系数矩阵\n");
-        fprintf(fp, ",");
-        for (int j = 0; j < 6; j++) fprintf(fp, "%s%s", param_keys[j], j < 5 ? "," : "\n");
+        fprintf(fp, "\n参数");
+        for (int j = 0; j < 6; j++) fprintf(fp, ",%s", param_keys[j]);
+        fprintf(fp, "\n");
         for (int i = 0; i < 6; i++) {
             fprintf(fp, "%s", param_keys[i]);
             for (int j = 0; j < 6; j++) {
@@ -655,15 +656,15 @@ void generate_correlation_matrix(const WaterDataset *dataset, double matrix[6][6
 
     /* ── 步骤7：追加 CSV 结论 ── */
     if (fp) {
-        fprintf(fp, "\n相关性分析结论\n");
-        fprintf(fp, "最强正相关,%s ↔ %s,r=%.4f\n",
+        fprintf(fp, "\n分析项目,参数对,相关系数\n");
+        fprintf(fp, "最强正相关,%s ↔ %s,%.4f\n",
                 param_keys[max_i], param_keys[max_j], max_r);
-        fprintf(fp, "最强负相关,%s ↔ %s,r=%.4f\n",
+        fprintf(fp, "最强负相关,%s ↔ %s,%.4f\n",
                 param_keys[min_i], param_keys[min_j], min_r);
-        fprintf(fp, "水温 ↔ 溶解氧,r=%.4f\n", r_temp_do);
-        fprintf(fp, "pH ↔ 溶解氧,r=%.4f\n", r_ph_do);
-        fprintf(fp, "水温 ↔ 气温,r=%.4f\n", r_temp_air);
-        fprintf(fp, "水温 ↔ 盐度,r=%.4f\n", r_temp_sal);
+        fprintf(fp, "特定参数对,水温 ↔ 溶解氧,%.4f\n", r_temp_do);
+        fprintf(fp, "特定参数对,pH ↔ 溶解氧,%.4f\n", r_ph_do);
+        fprintf(fp, "特定参数对,水温 ↔ 气温,%.4f\n", r_temp_air);
+        fprintf(fp, "特定参数对,水温 ↔ 盐度,%.4f\n", r_temp_sal);
         fclose(fp);
         printf("\n  相关系数矩阵已追加写入 reports/statistics_report.csv\n");
     }

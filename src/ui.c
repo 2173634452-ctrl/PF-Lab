@@ -4,9 +4,11 @@
 #include "backup.h"
 #include "preprocess.h"
 #include "analysis.h"
+#include "model.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 
 /* ═════════════════════════════════════════════════════════════════════
@@ -81,9 +83,22 @@ void handle_menu_choice(int choice, WaterDataset **dataset) {
             }
             break;
         }
-        case 4:
-            printf("进入预测分析模块...\n");
+        case 4: {
+            /* 模块四子菜单循环 */
+            int sub_choice = -1;
+            while (sub_choice != 0) {
+                show_prediction_submenu(*dataset);
+                if (scanf("%d", &sub_choice) != 1) {
+                    printf("输入错误，请重新输入。\n");
+                    while (getchar() != '\n');
+                    sub_choice = -1;
+                    continue;
+                }
+                while (getchar() != '\n');
+                handle_prediction_submenu(sub_choice, dataset);
+            }
             break;
+        }
         case 5:
             display_overview(*dataset);
             break;
@@ -572,6 +587,251 @@ void handle_analysis_submenu(int choice, WaterDataset **dataset) {
             break;
 
         case 0:
+            break;
+
+        default:
+            printf("无效选择，请重新输入。\n");
+            break;
+    }
+}
+
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  模块四 子菜单
+ * ═════════════════════════════════════════════════════════════════════ */
+
+/* 辅助：带边框的多行确认提示 */
+static bool confirm_with_box(const char *title, const char **lines,
+                             int line_count) {
+    printf("\n  ╔══════════════════════════════════════════════════╗\n");
+    printf("  ║  ⚠ %-44s ║\n", title);
+    printf("  ║                                                  ║\n");
+    for (int i = 0; i < line_count; i++) {
+        printf("  ║  %-48s ║\n", lines[i]);
+    }
+    printf("  ╠══════════════════════════════════════════════════╣\n");
+    printf("  ║  确认执行？(Y/N):                                 ║\n");
+    printf("  ╚══════════════════════════════════════════════════╝\n");
+    printf("  请选择 (Y/N): ");
+    char ans;
+    scanf(" %c", &ans);
+    while (getchar() != '\n');
+    return (ans == 'Y' || ans == 'y');
+}
+
+/* 辅助：检查数据是否需要预处理（模块四专用）
+ * 若未预处理，弹出确认询问，用户同意则自动执行三步预处理
+ * 返回 true 表示可以继续，false 表示用户取消
+ */
+static bool ensure_preprocessed_for_model(WaterDataset **dataset) {
+    if (!dataset || !*dataset) return false;
+
+    if ((*dataset)->preprocessed) return true;
+
+    /* 展示当前模型所需预处理步骤并询问 */
+    printf("\n  ╔══════════════════════════════════════════════════╗\n");
+    printf("  ║  ⚠ 当前数据尚未进行预处理                         ║\n");
+    printf("  ║                                                  ║\n");
+    printf("  ║  单因素线性回归模型需要以下预处理步骤:              ║\n");
+    printf("  ║    1. 异常值检测与处理 (2.1)                      ║\n");
+    printf("  ║    2. 缺失值填补 — 均值逼近法 (2.2)               ║\n");
+    printf("  ║    3. 移动平均滤波 — 窗口大小=5 (2.3)             ║\n");
+    printf("  ║                                                  ║\n");
+    printf("  ╠══════════════════════════════════════════════════╣\n");
+    printf("  ║  是否现在执行预处理？(Y/N):                       ║\n");
+    printf("  ╚══════════════════════════════════════════════════╝\n");
+    printf("  请选择 (Y/N): ");
+    char ans;
+    scanf(" %c", &ans);
+    while (getchar() != '\n');
+
+    if (ans != 'Y' && ans != 'y') {
+        printf("  已取消，请先执行数据预处理后再试。\n");
+        return false;
+    }
+
+    printf("\n  正在执行预处理步骤，请稍候...\n");
+    detect_and_handle_outliers(*dataset);
+    fill_missing_values(*dataset);
+    apply_moving_average(*dataset, 5);
+    (*dataset)->preprocessed = true;
+    printf("  预处理完成！\n");
+
+    return true;
+}
+
+void show_prediction_submenu(const WaterDataset *dataset) {
+    printf("\n");
+    printf("  ╔════════════════════════════════════╗\n");
+    printf("  ║      模块四：预测分析              ║\n");
+    printf("  ╠════════════════════════════════════╣\n");
+    printf("  ║  [1] 单因素回归 (Air_temp → DO)   ║\n");
+    printf("  ║  [2] 模型评估 (R² + 留出法)       ║\n");
+    printf("  ║  [3] 多因子探索                   ║\n");
+    printf("  ║  [4] 完整预测流程                 ║\n");
+    printf("  ║  [0] 返回主菜单                   ║\n");
+    printf("  ╚════════════════════════════════════╝\n");
+    printf("  当前数据: %s",
+           (dataset && dataset->total_count > 0) ? "已加载" : "未加载");
+    if (dataset && dataset->total_count > 0) {
+        printf(" | 预处理: %s", dataset->preprocessed ? "✓已完成" : "✗未完成");
+    }
+    printf("\n");
+    printf("  请选择操作 (0-4): ");
+}
+
+void handle_prediction_submenu(int choice, WaterDataset **dataset) {
+    switch (choice) {
+        case 1: {
+            /* 4.1.1 单因素回归 Air_temp → DO */
+            if (!ensure_data_loaded(*dataset)) break;
+            if (!ensure_preprocessed_for_model(dataset)) break;
+
+            /* 确认点 1：训练前询问 */
+            {
+                const char *lines[] = {
+                    "特征变量: 气温 (Air_temp)",
+                    "目标变量: 溶解氧 (DO)",
+                    "模型形式: DO = a × Air_temp + b",
+                    "拟合方法: 最小二乘法 (OLS)",
+                    "数据范围: 全部有效记录 (valid=true)",
+                };
+                if (!confirm_with_box("即将训练单因素线性回归模型",
+                                      lines, 5)) {
+                    printf("  已取消训练。\n");
+                    break;
+                }
+            }
+
+            RegressionModel model;
+            train_linear_regression(*dataset, 5, &model);  /* PARAM_AIR_TEMP = 5 */
+
+            if (!model.trained) break;
+
+            /* 训练完成后询问是否交互预测 */
+            printf("\n  模型训练完成！是否进行交互式预测？(Y/N): ");
+            char ans;
+            scanf(" %c", &ans);
+            while (getchar() != '\n');
+
+            if (ans == 'Y' || ans == 'y') {
+                printf("\n  ┌────────── 交互式预测 ──────────┐\n");
+                printf("  │ 输入气温值，预测溶解氧(DO)      │\n");
+                printf("  │ 输入 -999 退出预测循环          │\n");
+                printf("  └────────────────────────────────┘\n");
+
+                while (true) {
+                    printf("  请输入气温 (℃): ");
+                    double air_temp;
+                    if (scanf("%lf", &air_temp) != 1) {
+                        printf("  输入无效，请重新输入。\n");
+                        while (getchar() != '\n');
+                        continue;
+                    }
+                    while (getchar() != '\n');
+
+                    if (air_temp < -900) {
+                        printf("  退出预测。\n");
+                        break;
+                    }
+
+                    double do_pred = predict_do_from_air_temp(air_temp);
+                    if (!isnan(do_pred)) {
+                        printf("  ┌──────────────────────────────────┐\n");
+                        printf("  │ 气温 %.2f ℃ → 预测 DO = %.4f mg/L │\n",
+                               air_temp, do_pred);
+                        printf("  │ 回归方程: DO = %.4f × %.2f + %.4f  │\n",
+                               model.a, air_temp, model.b);
+                        printf("  └──────────────────────────────────┘\n");
+                    }
+                }
+            }
+            break;
+        }
+
+        case 2: {
+            /* 4.1.2 模型评估 */
+            if (!ensure_data_loaded(*dataset)) break;
+
+            const RegressionModel *gm = get_regression_model();
+            if (!gm || !gm->trained) {
+                printf("错误：尚无已训练的模型，请先执行 [1] 单因素回归。\n");
+                break;
+            }
+            if (!ensure_preprocessed_for_model(dataset)) break;
+
+            /* 确认点 2：评估前询问 */
+            {
+                char line1[64];
+                snprintf(line1, sizeof(line1),
+                         "当前模型: DO = %.4f × Air_temp + %.4f",
+                         gm->a, gm->b);
+                const char *lines[] = {
+                    line1,
+                    "评估方法: R² (决定系数) + 留出法 (80/20)",
+                    "留出法: 前80%训练 / 后20%测试 (时间有序)",
+                };
+                if (!confirm_with_box("即将评估当前回归模型", lines, 3)) {
+                    printf("  已取消评估。\n");
+                    break;
+                }
+            }
+
+            evaluate_regression_model(*dataset, gm);
+            break;
+        }
+
+        case 3: {
+            /* 4.1.3 多因子探索 */
+            if (!ensure_data_loaded(*dataset)) break;
+            if (!ensure_preprocessed_for_model(dataset)) break;
+
+            /* 确认点 3：多因子探索前询问 */
+            {
+                const char *lines[] = {
+                    "将分别以以下因子作为自变量，DO 作为因变量:",
+                    "  · 水温 (Temp)",
+                    "  · pH",
+                    "  · 盐度 (Salinity)",
+                    "排除: 降水量 (Precip) — 预处理后方差≈0",
+                    "比较各模型的 R²，判断最佳预测因子",
+                };
+                if (!confirm_with_box("即将执行多因子探索", lines, 5)) {
+                    printf("  已取消多因子探索。\n");
+                    break;
+                }
+            }
+
+            explore_multi_factor(*dataset);
+            break;
+        }
+
+        case 4: {
+            /* 4.1 完整预测流程 */
+            if (!ensure_data_loaded(*dataset)) break;
+            if (!ensure_preprocessed_for_model(dataset)) break;
+
+            /* 确认点 4：完整流程前询问 */
+            {
+                const char *lines[] = {
+                    "步骤:",
+                    "  1) 训练 Air_temp → DO 单因素回归模型",
+                    "  2) 模型评估 (R² + 留出法 RMSE)",
+                    "  3) 多因子探索 (Temp/pH/Salinity → DO)",
+                    "输出: reports/prediction_report.csv",
+                };
+                if (!confirm_with_box("即将执行完整预测流程", lines, 5)) {
+                    printf("  已取消完整流程。\n");
+                    break;
+                }
+            }
+
+            run_full_prediction_pipeline(*dataset);
+            break;
+        }
+
+        case 0:
+            /* 返回主菜单 */
             break;
 
         default:
