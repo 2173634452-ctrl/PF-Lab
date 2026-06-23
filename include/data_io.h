@@ -11,6 +11,7 @@ void write_data_overview(const WaterDataset *dataset);
 bool save_csv_data(const char *filename, const WaterDataset *dataset);
 bool save_binary_data(const char *filename, const WaterDataset *dataset);
 WaterDataset *load_binary_data(const char *filename);
+bool read_binary_record(const char *filename, size_t index, WaterRecord *out_rec);
 void compare_storage_performance(const WaterDataset *dataset);
 
 /* ── 1.4 数据查询 ── */

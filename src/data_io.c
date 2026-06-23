@@ -395,6 +395,52 @@ WaterDataset *load_binary_data(const char *filename) {
     return dataset;
 }
 
+/* ═════════════════════════════════════════════════════════════════════
+ *  1.3 二进制随机读取（fseek 定位单条记录，不加载全部数据）
+ *  header = 3 × sizeof(size_t) bytes
+ *  第 index 条记录位于 header_size + index * sizeof(WaterRecord)
+ * ═════════════════════════════════════════════════════════════════════ */
+bool read_binary_record(const char *filename, size_t index, WaterRecord *out_rec) {
+    if (!filename || !out_rec) return false;
+
+    FILE *fp = fopen(filename, "rb");
+    if (!fp) {
+        printf("错误：无法打开二进制文件 \"%s\"\n", filename);
+        return false;
+    }
+
+    /* 先读元信息获取 total_count */
+    size_t total_count = 0;
+    if (fread(&total_count, sizeof(size_t), 1, fp) != 1) {
+        printf("错误：二进制文件格式损坏\n");
+        fclose(fp);
+        return false;
+    }
+
+    if (index >= total_count) {
+        printf("错误：记录号 %zu 超出范围（总记录数 %zu）\n", index, total_count);
+        fclose(fp);
+        return false;
+    }
+
+    /* seek 到目标记录位置：header (3×size_t) + index × sizeof(WaterRecord) */
+    long offset = (long)(3 * sizeof(size_t) + index * sizeof(WaterRecord));
+    if (fseek(fp, offset, SEEK_SET) != 0) {
+        printf("错误：fseek 定位失败（offset=%ld）\n", offset);
+        fclose(fp);
+        return false;
+    }
+
+    if (fread(out_rec, sizeof(WaterRecord), 1, fp) != 1) {
+        printf("错误：读取第 %zu 条记录失败\n", index);
+        fclose(fp);
+        return false;
+    }
+
+    fclose(fp);
+    return true;
+}
+
 void compare_storage_performance(const WaterDataset *dataset) {
     if (!dataset) {
         printf("错误：无数据集，请先加载数据。\n");
@@ -466,6 +512,35 @@ void compare_storage_performance(const WaterDataset *dataset) {
     printf("╚═══════════╧══════════════╧════════════╧═══════════╧════════╝\n");
     printf("\n  理论原始数据大小 ≈ %zu 字节（CSV估算）/ %zu 字节（二进制）\n",
            theory_csv, theory_bin);
+
+    /* ── 1.3(5) 讨论分析 ── */
+    printf("\n╔══════════════════════════════════════════════════════════════╗\n");
+    printf("║              存储格式适用场景分析                            ║\n");
+    printf("╠══════════════════════════════════════════════════════════════╣\n");
+
+    printf("║  [CSV 适用场景]                                             ║\n");
+    printf("║  · 需要人类直接查看或编辑数据（Excel/记事本即开即用）       ║\n");
+    printf("║  · 跨平台/跨语言数据交换（CSV 是通用文本格式）              ║\n");
+    printf("║  · 数据量较小（万级以内），对性能要求不敏感                 ║\n");
+    printf("║  · 需要版本控制或 diff 对比（Git 可逐行追踪变更）           ║\n");
+    printf("║  · 原型开发阶段，调试时可直接查看数据正确性                 ║\n");
+    printf("╟──────────────────────────────────────────────────────────────╢\n");
+    printf("║  [二进制适用场景]                                           ║\n");
+    printf("║  · 追求存储效率：二进制无需文本转换，文件更小               ║\n");
+    printf("║  · 追求读写速度：无需解析文本，直接内存映射                  ║\n");
+    printf("║  · 大规模数据（百万级以上），文本解析开销不可接受           ║\n");
+    printf("║  · 需要随机访问：可 fseek 按记录号直接定位单条记录          ║\n");
+    printf("║  · 浮点精度敏感：二进制保留 IEEE 754 完整精度，无舍入误差   ║\n");
+    printf("╠══════════════════════════════════════════════════════════════╣\n");
+    printf("║  [实际大小 vs 理论大小差异原因]                              ║\n");
+    printf("║  CSV 实际可能大于理论：                                     ║\n");
+    printf("║  (a) 浮点数文本表示长度可变（1.0 vs 0.123456789）           ║\n");
+    printf("║  (b) 每条记录占一行，换行符(\\r\\n或\\n)计入文件大小            ║\n");
+    printf("║  (c) 无效记录以 \"NaN\" 字符串占位，比正常数值更长            ║\n");
+    printf("║  二进制实际可能大于理论：                                   ║\n");
+    printf("║  (a) 结构体对齐填充（padding）：编译器在成员间插入空字节    ║\n");
+    printf("║  (b) 文件头元信息（total_count/valid_count/capacity）       ║\n");
+    printf("╚══════════════════════════════════════════════════════════════╝\n");
 
     /* 清理测试文件 */
     remove(csv_file);

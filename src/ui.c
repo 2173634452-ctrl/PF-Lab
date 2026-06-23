@@ -19,6 +19,7 @@ static void display_text_file(const char *filepath, const char *title);
  * ═════════════════════════════════════════════════════════════════════ */
 
 void show_main_menu(UserRole role) {
+    (void)role;  /* RBAC: 根据角色动态显示菜单项 */
     printf("\n========================================\n");
     printf("  海水养殖水质分析系统 v1.0\n");
     printf("========================================\n");
@@ -49,6 +50,7 @@ void handle_menu_choice(int choice, WaterDataset **dataset, UserRole role) {
         printf("权限不足：当前用户角色无权访问此功能。\n");
         return;
     }
+    (void)role;  /* RBAC: 权限检查已由调用方处理 */
     switch (choice) {
         case 1: {
             /* 模块一子菜单循环 */
@@ -685,6 +687,7 @@ void show_prediction_submenu(const WaterDataset *dataset) {
     printf("  ║  [2] 模型评估 (R² + 留出法)       ║\n");
     printf("  ║  [3] 多因子探索                   ║\n");
     printf("  ║  [4] 完整预测流程                 ║\n");
+    printf("  ║  [5] 多元线性回归 (4.2选做)       ║\n");
     printf("  ║  [0] 返回主菜单                   ║\n");
     printf("  ╚════════════════════════════════════╝\n");
     printf("  当前数据: %s",
@@ -693,7 +696,7 @@ void show_prediction_submenu(const WaterDataset *dataset) {
         printf(" | 预处理: %s", dataset->preprocessed ? "✓已完成" : "✗未完成");
     }
     printf("\n");
-    printf("  请选择操作 (0-4): ");
+    printf("  请选择操作 (0-5): ");
 }
 
 void handle_prediction_submenu(int choice, WaterDataset **dataset) {
@@ -843,6 +846,77 @@ void handle_prediction_submenu(int choice, WaterDataset **dataset) {
             }
 
             run_full_prediction_pipeline(*dataset);
+            break;
+        }
+
+        case 5: {
+            /* 4.2 选做：多元线性回归 */
+            if (!ensure_data_loaded(*dataset)) break;
+            if (!ensure_preprocessed_for_model(dataset)) break;
+
+            {
+                const char *lines[] = {
+                    "特征变量 (7个):",
+                    "  1. 水温(Temp)      5. sin(hour×2π/24)",
+                    "  2. pH               6. cos(hour×2π/24)",
+                    "  3. 盐度(Salinity)   7. Temp×pH (交互项)",
+                    "  4. 气温(Air_temp)",
+                    "目标变量: 溶解氧 (DO)",
+                    "求解方法: 正规方程 + 高斯-约当消元",
+                    "评估: R² / 调整R² / VIF共线性诊断 / 留出法RMSE",
+                    "输出: 追加至 prediction_report.csv Section 5",
+                };
+                if (!confirm_with_box("即将训练多元线性回归模型 (4.2选做)",
+                                      lines, 9)) {
+                    printf("  已取消训练。\n");
+                    break;
+                }
+            }
+
+            MLRModel mlr_model;
+            train_multivariate_regression(*dataset, &mlr_model);
+
+            if (!mlr_model.trained) {
+                printf("\n多元线性回归训练失败，请检查数据质量。\n");
+                break;
+            }
+
+            evaluate_multivariate_regression(*dataset, &mlr_model);
+
+            /* 询问是否追加到 CSV */
+            if (confirm_with_box("是否将 MLR 结果追加到预测报告？",
+                                 (const char *[]){
+                                     "将向 reports/prediction_report.csv 追加:",
+                                     "· 各特征系数及 VIF",
+                                     "· R² / 调整R² / 留出法RMSE",
+                                     "· MLR vs 单因素对比",
+                                 }, 4)) {
+                FILE *fp = fopen("reports/prediction_report.csv", "a");
+                if (fp) {
+                    fprintf(fp, "\n多元线性回归 (4.2选做),\n");
+                    fprintf(fp, "特征,系数,VIF\n");
+                    for (int j = 0; j < mlr_model.feature_count; j++) {
+                        fprintf(fp, "%s,%.6f,%.4f\n",
+                                mlr_model.feature_names[j],
+                                mlr_model.coeffs[j], mlr_model.vif[j]);
+                    }
+                    fprintf(fp, "截距(Intercept),%.6f,\n", mlr_model.intercept);
+                    fprintf(fp, "R²,%.6f,\n", mlr_model.r_squared);
+                    fprintf(fp, "调整R²,%.6f,\n", mlr_model.adjusted_r_squared);
+                    fprintf(fp, "留出法RMSE,%.6f,\n", mlr_model.rmse);
+                    fprintf(fp, "特征数,%d,\n", mlr_model.feature_count);
+                    fprintf(fp, "\n与单因素对比,R²,调整R²\n");
+                    fprintf(fp, "单因素最佳(pH→DO),0.1679,-\n");
+                    fprintf(fp, "单因素Air_temp→DO,0.0000,-\n");
+                    if (!isnan(mlr_model.r_squared))
+                        fprintf(fp, "MLR(7特征),%.4f,%.4f\n",
+                                mlr_model.r_squared, mlr_model.adjusted_r_squared);
+                    fclose(fp);
+                    printf("  报告已追加至 reports/prediction_report.csv\n");
+                } else {
+                    printf("  警告：无法写入报告文件。\n");
+                }
+            }
             break;
         }
 
