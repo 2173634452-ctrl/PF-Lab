@@ -30,6 +30,7 @@ desktop.ini
 # Data files
 data/raw/*
 data/processed/*
+data/users.dat
 backup/*
 reports/*
 
