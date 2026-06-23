@@ -26,6 +26,5 @@ void handle_prediction_submenu(int choice, WaterDataset **dataset);
 
 /* ── 报告 ── */
 void display_overview(const WaterDataset *dataset);
-void display_report_menu(void);
 
 #endif // UI_H

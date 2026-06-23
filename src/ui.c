@@ -11,29 +11,44 @@
 #include <math.h>
 
 
+/* 前向声明：在主菜单处理函数中引用，定义在文件后部 */
+static void display_text_file(const char *filepath, const char *title);
+
 /* ═════════════════════════════════════════════════════════════════════
  *  主菜单
  * ═════════════════════════════════════════════════════════════════════ */
 
-void show_main_menu(void) {
+void show_main_menu(UserRole role) {
     printf("\n========================================\n");
     printf("  海水养殖水质分析系统 v1.0\n");
     printf("========================================\n");
-    printf(" [1] 数据基础操作\n");
-    printf(" [2] 数据预处理\n");
-    printf(" [3] 统计分析\n");
-    printf(" [4] 预测分析\n");
-    printf(" [5] 查看数据概览\n");
-    printf(" [6] 查看预警报告\n");
-    printf(" [7] 查看分析报告\n");
-    printf(" [8] 数据备份与恢复\n");
-    printf(" [9] 清屏\n");
-    printf(" [0] 退出系统\n");
+    if (role == ROLE_ADMIN) {
+        printf(" [1] 数据基础操作\n");
+        printf(" [2] 数据预处理\n");
+        printf(" [3] 统计分析\n");
+        printf(" [4] 预测分析\n");
+        printf(" [5] 查看数据概览\n");
+        printf(" [6] 查看预警报告\n");
+        printf(" [7] 查看分析报告\n");
+        printf(" [8] 数据备份与恢复\n");
+        printf(" [9] 清屏\n");
+        printf(" [0] 退出系统\n");
+    } else {
+        printf(" [5] 查看数据概览\n");
+        printf(" [7] 查看分析报告\n");
+        printf(" [9] 清屏\n");
+        printf(" [0] 退出系统\n");
+    }
     printf("========================================\n");
     printf("  请选择操作 (0-9): ");
 }
 
-void handle_menu_choice(int choice, WaterDataset **dataset) {
+void handle_menu_choice(int choice, WaterDataset **dataset, UserRole role) {
+    /* 权限守卫：拒绝 guest 访问未授权的功能 */
+    if (!has_permission(role, choice)) {
+        printf("权限不足：当前用户角色无权访问此功能。\n");
+        return;
+    }
     switch (choice) {
         case 1: {
             /* 模块一子菜单循环 */
@@ -907,8 +922,4 @@ void display_overview(const WaterDataset *dataset) {
         }
         printf("└──────────────────────────────────────┘\n");
     }
-}
-
-void display_report_menu(void) {
-    printf("报告查看功能尚未实现。\n");
 }

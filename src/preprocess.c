@@ -527,6 +527,49 @@ static double compute_stddev(const double *values, size_t count) {
 }
 
 /* ═════════════════════════════════════════════════════════════════════
+ *  内部辅助：对数组应用移动平均滤波（不修改原数组）
+ *
+ *  将滤波结果写入 output 数组。调用者负责分配 output（需与 input 等长）。
+ *  边界处理：非对称窗口，可用点即除数。
+ * ═════════════════════════════════════════════════════════════════════ */
+static void apply_ma_to_array(const double *input, double *output,
+                              size_t n, int window_size) {
+    int k = (window_size - 1) / 2;
+    for (size_t i = 0; i < n; i++) {
+        size_t start = (i >= (size_t)k) ? (i - k) : 0;
+        size_t end   = (i + k < n) ? (i + k) : (n - 1);
+        double sum = 0.0;
+        size_t count = 0;
+        for (size_t j = start; j <= end; j++) {
+            sum += input[j];
+            count++;
+        }
+        output[i] = (count > 0) ? (sum / (double)count) : input[i];
+    }
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  内部辅助：计算指定窗口下单个参数数组的噪声降低百分比
+ *
+ *  返回值 = (1 − σ_after / σ_before) × 100%
+ *  不修改原数组。用于全窗口对比时预判各窗口效果。
+ * ═════════════════════════════════════════════════════════════════════ */
+static double compute_noise_reduction(const double *values, size_t n,
+                                      int window_size) {
+    double stddev_before = compute_stddev(values, n);
+    if (stddev_before <= 0.0) return 0.0;
+
+    double *filtered = (double *)malloc(sizeof(double) * n);
+    if (!filtered) return 0.0;
+
+    apply_ma_to_array(values, filtered, n, window_size);
+    double stddev_after = compute_stddev(filtered, n);
+    free(filtered);
+
+    return (1.0 - stddev_after / stddev_before) * 100.0;
+}
+
+/* ═════════════════════════════════════════════════════════════════════
  *  2.3 移动平均滤波
  *
  *  公式: y[i] = (x[i-k] + ... + x[i] + ... + x[i+k]) / N
@@ -555,7 +598,6 @@ void apply_moving_average(WaterDataset *dataset, int window_size) {
         window_size = 3;
     }
 
-    int k = (window_size - 1) / 2;  /* 半窗口大小 */
     size_t n = dataset->total_count;
 
     printf("\n╔══════════════════════════════════════════════════════════╗\n");
@@ -598,21 +640,7 @@ void apply_moving_average(WaterDataset *dataset, int window_size) {
         double stddev_before = compute_stddev(original, n);
 
         /* ── 步骤3：应用移动平均滤波 ── */
-        for (size_t i = 0; i < n; i++) {
-            /* 确定滤波窗口的实际范围（处理边界） */
-            size_t start = (i >= (size_t)k) ? (i - k) : 0;
-            size_t end   = (i + k < n) ? (i + k) : (n - 1);
-
-            /* 计算窗口内的平均值 */
-            double sum = 0.0;
-            size_t count = 0;
-            for (size_t j = start; j <= end; j++) {
-                sum += original[j];
-                count++;
-            }
-
-            filtered[i] = (count > 0) ? (sum / (double)count) : original[i];
-        }
+        apply_ma_to_array(original, filtered, n, window_size);
 
         /* ── 步骤4：计算滤波后标准差 ── */
         double stddev_after = compute_stddev(filtered, n);
@@ -640,6 +668,97 @@ void apply_moving_average(WaterDataset *dataset, int window_size) {
 
 
 /* ═════════════════════════════════════════════════════════════════════
+ *  全窗口自动对比：一次性跑完 3/5/7/9/11 五个窗口
+ *
+ *  对水温、DO、pH、盐度四个参数分别计算各窗口的噪声降低百分比。
+ *  输出对比表后，用户可以选择应用哪个窗口（或取消）。
+ *  对比过程不会修改原数据——只在用户最终确认后才写入。
+ * ═════════════════════════════════════════════════════════════════════ */
+static void compare_filter_windows(WaterDataset *dataset) {
+    size_t n = dataset->total_count;
+
+    ParamType params[] = {PARAM_TEMP, PARAM_DO, PARAM_PH, PARAM_SALINITY};
+    int windows[] = {3, 5, 7, 9, 11};
+
+    /* ── 提取当前四个参数的原始值 ── */
+    double *orig[4];
+    for (int p = 0; p < 4; p++) {
+        orig[p] = (double *)malloc(sizeof(double) * n);
+        if (!orig[p]) {
+            printf("错误：内存不足，无法进行对比分析。\n");
+            for (int q = 0; q < p; q++) free(orig[q]);
+            return;
+        }
+        for (size_t i = 0; i < n; i++) {
+            orig[p][i] = get_param_value(&dataset->records[i], params[p]);
+        }
+    }
+
+    /* ── 表头 ── */
+    printf("\n╔══════════════════════════════════════════════════════════════════╗\n");
+    printf("║       移动平均滤波 — 全窗口噪声降低对比 (%% )                    ║\n");
+    printf("╠══════╤══════════╤══════════╤══════════╤══════════╤══════════════╣\n");
+    printf("║ 窗口 │   水温   │    DO    │    pH    │   盐度   │    平均      ║\n");
+    printf("╟──────┼──────────┼──────────┼──────────┼──────────┼──────────────╢\n");
+
+    double best_avg = 0.0;
+    int best_window = 3;
+
+    for (int w = 0; w < 5; w++) {
+        printf("║  %-3d │", windows[w]);
+        double sum_reduction = 0.0;
+        for (int p = 0; p < 4; p++) {
+            double reduction = compute_noise_reduction(orig[p], n, windows[w]);
+            printf(" %7.1f%% │", reduction);
+            sum_reduction += reduction;
+        }
+        double avg = sum_reduction / 4.0;
+        printf("  %7.1f%%  ║\n", avg);
+        if (avg > best_avg) {
+            best_avg = avg;
+            best_window = windows[w];
+        }
+    }
+
+    printf("╚══════╧══════════╧══════════╧══════════╧══════════╧══════════════╝\n");
+
+    /* ── 分析建议 ── */
+    printf("\n┌──────────────────────────────────────────────────────────────┐\n");
+    printf("│  分析讨论：窗口大小与噪声抑制的关系                          │\n");
+    printf("├──────────────────────────────────────────────────────────────┤\n");
+    printf("│  窗口=3  → 轻度平滑（约20-30%% 降噪），保留短期波动         │\n");
+    printf("│  窗口=5  → 中度平滑（约30-45%% 降噪），滤除高频噪声         │\n");
+    printf("│  窗口=7  → 较强平滑（约40-55%% 降噪），趋势更明显           │\n");
+    printf("│  窗口=9  → 强平滑（约50-65%% 降噪），适合长期趋势           │\n");
+    printf("│  窗口=11 → 最强平滑（约55-70%% 降噪），细节损失较多         │\n");
+    printf("│                                                              │\n");
+    printf("│  单纯从降噪效果看，窗口 %d 的平均降噪率最高（%.1f%%）。       │\n",
+           best_window, best_avg);
+    printf("│  但窗口越大，短期真实变化也可能被平滑掉。                    │\n");
+    printf("│  对于水质监测场景，窗口 5 或 7 通常在平滑度与细节保留        │\n");
+    printf("│  之间取得较好平衡，推荐优先考虑。                            │\n");
+    printf("└──────────────────────────────────────────────────────────────┘\n");
+
+    /* ── 让用户选择应用哪个窗口 ── */
+    printf("\n请输入要应用的窗口大小 (3/5/7/9/11，输入 0 取消): ");
+    int choice;
+    if (scanf("%d", &choice) != 1) {
+        while (getchar() != '\n');
+        choice = 0;
+    }
+    while (getchar() != '\n');
+
+    if (choice == 3 || choice == 5 || choice == 7 || choice == 9 || choice == 11) {
+        apply_moving_average(dataset, choice);
+    } else {
+        printf("已取消，数据未修改。\n");
+    }
+
+    /* 清理 */
+    for (int p = 0; p < 4; p++) free(orig[p]);
+}
+
+/* ═════════════════════════════════════════════════════════════════════
  *  交互式移动平均滤波
  *
  *  让用户选择窗口大小（3/5/7/9/11），然后：
@@ -661,9 +780,10 @@ void interactive_moving_average(WaterDataset *dataset) {
     printf("║         2.3 移动平均滤波 — 窗口选择                     ║\n");
     printf("╠══════════════════════════════════════════════════════════╣\n");
     printf("║  可选窗口: 3 / 5 / 7 / 9 / 11                          ║\n");
+    printf("║  输入 0 → 自动对比全部窗口并推荐最佳窗口               ║\n");
     printf("║  窗口越大，曲线越平滑，但可能丢失短期变化细节          ║\n");
     printf("╚══════════════════════════════════════════════════════════╝\n");
-    printf("\n请输入窗口大小: ");
+    printf("\n请输入窗口大小 (0=自动对比, 3/5/7/9/11): ");
 
     int window;
     if (scanf("%d", &window) != 1) {
@@ -673,9 +793,15 @@ void interactive_moving_average(WaterDataset *dataset) {
     }
     while (getchar() != '\n');
 
+    /* 自动对比模式 */
+    if (window == 0) {
+        compare_filter_windows(dataset);
+        return;
+    }
+
     /* 验证窗口大小 */
     if (window != 3 && window != 5 && window != 7 && window != 9 && window != 11) {
-        printf("窗口大小必须为 3/5/7/9/11 之一。\n");
+        printf("窗口大小必须为 0/3/5/7/9/11 之一。\n");
         return;
     }
 
@@ -695,7 +821,7 @@ void interactive_moving_average(WaterDataset *dataset) {
     printf("│  窗口=9  → 强平滑，适合分析长期趋势                     │\n");
     printf("│  窗口=11 → 最强平滑，可能丢失短期变化                   │\n");
     printf("│                                                          │\n");
-    printf("│  建议：可多次尝试不同窗口，观察标准差降低程度。          │\n");
+    printf("│  提示：输入 0 可自动对比全部窗口的降噪效果。             │\n");
     printf("│  通常窗口5或7能在平滑度和细节保留之间取得较好平衡。      │\n");
     printf("└──────────────────────────────────────────────────────────┘\n");
 }

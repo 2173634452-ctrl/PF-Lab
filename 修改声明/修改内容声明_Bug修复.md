@@ -1,14 +1,14 @@
 # 修改内容声明 — 模块一至三 Bug 修复
 
-> **日期**：2026-06-18
+> **日期**：2026-06-18（首次），2026-06-23（补充修复）
 > **修改人**：Claude Code (JackieLai 审查)
-> **范围**：模块一（数据基础操作）、模块二（数据预处理）、模块三（统计分析）
+> **范围**：模块一（数据基础操作）、模块二（数据预处理）、模块三（统计分析）、模块五（系统集成）
 
 ---
 
 ## 一、修复概览
 
-在对模块一至三的合规性审查中，发现 2 个严重逻辑错误、3 个中等错误和 3 个小问题。本次提交修复了其中 6 个问题，涉及 3 个源文件。后续模块五审查中又发现 2 个 UI 层问题，也已一并修复。
+在对模块一至三的合规性审查中，发现 2 个严重逻辑错误、3 个中等错误和 3 个小问题。本次提交修复了其中 6 个问题，涉及 3 个源文件。后续模块五审查中又发现 2 个 UI 层问题，也已一并修复。2026-06-23 代码审查中发现 UI 函数签名不匹配导致权限系统失效的关键 Bug，本次一并修复。
 
 ---
 
@@ -43,19 +43,17 @@
 - **修复**：对齐 `backup_dataset` 行为——无效记录输出 NaN 占位。
 - **影响文件**：`src/data_io.c`
 
-#### 修复4：权限控制未实际生效
+#### 修复4：UI 函数签名不匹配导致权限控制失效
 
-- **文件**：`include/ui.h`、`src/ui.c`、`src/main.c`（已在之前提交中修复）
-- **问题**：`auth.c` 中定义了 `has_permission()`，但 UI 层未调用，访客可访问所有功能。
+- **文件**：`src/ui.c`
+- **日期**：2026-06-23
+- **问题**：`ui.h` 中声明 `show_main_menu(UserRole role)` 和 `handle_menu_choice(int, WaterDataset**, UserRole)`，但 `ui.c` 中对应的函数定义为 `show_main_menu(void)` 和 `handle_menu_choice(int, WaterDataset**)`，缺少 `UserRole role` 参数。`main.c` 调用时按头文件签名传入 `role`，而实际函数不接受该参数，属于 C 语言中实参与形参不匹配的未定义行为。同时 `auth.c` 中已实现的 `has_permission()` 从未被 UI 层调用，导致 guest 用户能看到并操作所有功能菜单，权限控制形同虚设。
 - **修复**：
-  - `ui.h` 引入 `auth.h`，主菜单函数增加 `UserRole role` 参数
-  - `show_main_menu` 根据角色动态显示/隐藏菜单项
-  - `handle_menu_choice` 开头调用 `has_permission()` 进行权限检查
-  - `main.c` 将登录获取的 `role` 传入菜单函数
-- **权限规则**：
-  - 管理员（admin）：全部功能
-  - 访客（guest）：仅 [5] 数据概览、[7] 分析报告、[9] 清屏、[0] 退出
-- **影响文件**：`include/ui.h`、`src/ui.c`、`src/main.c`、`src/auth.c`
+  - `show_main_menu` 增加 `UserRole role` 参数，根据 admin/guest 角色分别显示不同的菜单项——admin 看到全部 10 个选项，guest 只能看到 [5] 数据概览、[7] 分析报告、[9] 清屏、[0] 退出
+  - `handle_menu_choice` 增加 `UserRole role` 参数，在 switch 分发前调用 `has_permission(role, choice)` 做权限守卫，guest 尝试访问未授权功能时直接提示"权限不足"并 return
+  - 添加 `display_text_file` 的前向声明，修复因该 static 函数被主菜单处理函数调用但定义在后部而产生的隐式声明编译错误
+- **编译验证**：`gcc -std=c11 -Wall -Iinclude src/*.c -o seawater_analysis -lm` 零错误零警告通过
+- **影响文件**：`src/ui.c`
 
 #### 修复5：Windows 下 mkdir 编译兼容性
 
@@ -95,17 +93,39 @@
 
 ---
 
+### 🔵 模块二、五功能缺口修复（2026-06-23）
+
+#### 修复9：移动平均滤波新增全窗口自动对比
+
+- **文件**：`src/preprocess.c`
+- **问题**：任务书 2.3(1) 要求"分别用窗口3、5、7、9、11"对四个参数进行滤波，但 `interactive_moving_average()` 只支持用户手动选一个窗口，无法一次性跑完五个窗口做横向对比。任务书 2.3(4) 要求的"确定最佳滤波窗口"也因此无从自动化。
+- **修复**：
+  - 抽离 `apply_ma_to_array()` 公共函数，将移动平均核心算法从 `apply_moving_average` 中独立出来，接受任意 double 数组，不修改原数据
+  - 新增 `compute_noise_reduction()` 函数，对单参数数组计算指定窗口下的降噪率，用于对比阶段预判效果
+  - 新增 `compare_filter_windows()` 函数，一次性用五个窗口计算四个参数的降噪率，输出横向对比表，自动标注最高降噪窗口并分析窗口大小与细节保留的权衡，最后由用户选择应用哪个窗口（对比阶段不修改数据）
+  - `interactive_moving_average()` 新增输入 `0` 进入自动对比模式
+  - `apply_moving_average()` 内层循环替换为 `apply_ma_to_array()` 调用，消除重复代码
+- **影响文件**：`src/preprocess.c`
+
+#### 修复10：清理 display_report_menu 死代码
+
+- **文件**：`include/ui.h`、`src/ui.c`
+- **问题**：`display_report_menu()` 在头文件中声明、源文件中实现为一句"报告查看功能尚未实现"的空壳，但该函数从未被任何地方调用——主菜单已通过 case 5/6/7 处理所有报告查看。属于残留的未完成代码。
+- **修复**：从 `ui.h` 和 `ui.c` 中删除声明和空壳实现。
+- **影响文件**：`include/ui.h`、`src/ui.c`
+
+---
+
 ## 三、修改文件汇总
 
 | 文件 | 修改类型 | 说明 |
 |------|---------|------|
 | `src/data_io.c` | 修改 | Fix#1: 缺失值→NaN; Fix#3: save_csv_data保留无效记录; Fix#6: 换行符处理 |
-| `src/preprocess.c` | 修改 | Fix#2: count_outliers跳过NaN + 不再跳过valid=false记录 |
+| `src/preprocess.c` | 修改 | Fix#2: count_outliers跳过NaN + 不再跳过valid=false记录; Fix#9: 全窗口自动对比 + 抽离公共函数 |
 | `src/backup.c` | 修改 | Fix#5: Windows _mkdir兼容 |
-| `include/ui.h` | 已修改 | Fix#4: 引入auth.h，增加UserRole参数 |
-| `src/ui.c` | 已修改 | Fix#4: 权限检查 + 动态菜单 |
-| `src/main.c` | 修改 | Fix#4: 传入role参数; Fix#7: 删除双重退出提示; Fix#8: 修正clear_console顺序 |
-| `src/auth.c` | 已修改 | Fix#4: has_permission开放0/9给所有角色 |
+| `src/ui.c` | 修改 (2026-06-23) | Fix#4: 修复函数签名不匹配 + 权限检查 + 动态菜单 + display_text_file前向声明; Fix#10: 移除display_report_menu死代码 |
+| `include/ui.h` | 修改 (2026-06-23) | Fix#10: 移除display_report_menu声明 |
+| `src/main.c` | 修改 | Fix#7: 删除双重退出提示; Fix#8: 修正clear_console顺序 |
 
 ---
 
