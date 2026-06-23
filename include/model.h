@@ -3,6 +3,16 @@
 
 #include "common.h"
 
+/* ── 参数类型枚举（与 preprocess.c / analysis.c 对齐）── */
+typedef enum {
+    PARAM_TEMP = 0,
+    PARAM_SALINITY,
+    PARAM_PH,
+    PARAM_DO,
+    PARAM_PRECIP,
+    PARAM_AIR_TEMP
+} ParamType;
+
 /* ── 回归模型结构体 ── */
 typedef struct {
     double a;           /* 斜率 */
@@ -10,6 +20,7 @@ typedef struct {
     double r_squared;   /* 决定系数 R² */
     double rmse;        /* 留出法均方根误差 */
     bool trained;       /* 是否已训练成功 */
+    int feature_param;  /* 所用特征 (ParamType) */
 } RegressionModel;
 
 /* ── 4.1.1 训练单因素线性回归模型 ── */

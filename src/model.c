@@ -6,17 +6,8 @@
 #include <float.h>
 
 /* ═════════════════════════════════════════════════════════════════════
- *  内部辅助：参数类型枚举（与 preprocess.c / analysis.c 对齐）
+ *  内部辅助：参数名称（ParamType 枚举已公开在 model.h）
  * ═════════════════════════════════════════════════════════════════════ */
-typedef enum {
-    PARAM_TEMP = 0,
-    PARAM_SALINITY,
-    PARAM_PH,
-    PARAM_DO,
-    PARAM_PRECIP,
-    PARAM_AIR_TEMP
-} ParamType;
-
 static const char *g_param_names[] = {
     "水温(Temp)", "盐度(Salinity)", "pH",
     "溶解氧(DO)", "降水量(Precip)", "气温(Air_temp)"
@@ -29,7 +20,7 @@ static const char *g_param_keys[] = {
 /* ═════════════════════════════════════════════════════════════════════
  *  全局回归模型（与 preprocess.c 的 g_stats 模式一致）
  * ═════════════════════════════════════════════════════════════════════ */
-static RegressionModel g_model = {0.0, 0.0, NAN, NAN, false};
+static RegressionModel g_model = {0.0, 0.0, NAN, NAN, false, PARAM_AIR_TEMP};
 
 /* ═════════════════════════════════════════════════════════════════════
  *  内部辅助：获取记录中指定参数的值
@@ -191,6 +182,7 @@ void train_linear_regression(const WaterDataset *dataset, int feature_param,
     model->b = b;
     model->r_squared = r2;
     model->trained = true;
+    model->feature_param = feature_param;
 
     printf("\n┌──────────────────────────────────────────┐\n");
     printf("│        单因素线性回归模型训练完成          │\n");
@@ -289,16 +281,18 @@ void evaluate_regression_model(const WaterDataset *dataset,
         return;
     }
 
+    ParamType feat = (ParamType)model->feature_param;
     size_t ti = 0, si = 0;
     for (size_t i = 0; i < dataset->total_count; i++) {
         if (!dataset->records[i].valid) continue;
+        double x_val = get_param_value(&dataset->records[i], feat);
         double do_val = dataset->records[i].DO;
         if (ti < train_n) {
-            train_set[ti].x = dataset->records[i].air_temp;
+            train_set[ti].x = x_val;
             train_set[ti].y = do_val;
             ti++;
         } else if (si < test_n) {
-            test_set[si].x = dataset->records[i].air_temp;
+            test_set[si].x = x_val;
             test_set[si].y = do_val;
             si++;
         }

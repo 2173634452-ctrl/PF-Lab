@@ -185,13 +185,14 @@ typedef struct {
     double r_squared;   // 决定系数 R²
     double rmse;        // 留出法 RMSE
     bool trained;       // 是否已训练成功
+    int feature_param;  // 所用特征 (ParamType)
 } RegressionModel;
 ```
 
 ### 全局状态管理
 
 ```c
-static RegressionModel g_model = {0.0, 0.0, NAN, NAN, false};
+static RegressionModel g_model = {0.0, 0.0, NAN, NAN, false, PARAM_AIR_TEMP};
 ```
 
 - `train_linear_regression()` 训练完成后自动更新 `g_model`

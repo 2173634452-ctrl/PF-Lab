@@ -705,7 +705,7 @@ void handle_prediction_submenu(int choice, WaterDataset **dataset) {
             }
 
             RegressionModel model;
-            train_linear_regression(*dataset, 5, &model);  /* PARAM_AIR_TEMP = 5 */
+            train_linear_regression(*dataset, PARAM_AIR_TEMP, &model);
 
             if (!model.trained) break;
 
